@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Warmer Where You Are</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden;cursor:crosshair}
+  canvas{display:block}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.42;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap">made alone &mdash; move, and see it warm where you are</div>
+<script>
+// Embers drift on a slow noise current. Left alone, a point of warmth
+// wanders the field on its own and they gather to it, then cool. When a
+// pointer is present, the warmth is you. The place was made in solitude;
+// it just turns out to be warmer when visited.
+
+// --- value noise (self-contained) ---------------------------------------
+const perm = new Uint8Array(512);
+(function(){
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = 20260817;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 255; i > 0; i--){ const j = (rnd() * (i + 1)) | 0; const t = p[i]; p[i] = p[j]; p[j] = t; }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+})();
+const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+const lerp = (a, b, t) => a + (b - a) * t;
+function grad(h, x, y){ switch (h & 3){ case 0: return x + y; case 1: return -x + y; case 2: return x - y; default: return -x - y; } }
+function noise2(x, y){
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  x -= Math.floor(x); y -= Math.floor(y);
+  const u = fade(x), v = fade(y);
+  const aa = perm[perm[X] + Y], ab = perm[perm[X] + Y + 1];
+  const ba = perm[perm[X + 1] + Y], bb = perm[perm[X + 1] + Y + 1];
+  return lerp(lerp(grad(aa, x, y), grad(ba, x - 1, y), u),
+              lerp(grad(ab, x, y - 1), grad(bb, x - 1, y - 1), u), v);
+}
+
+// --- setup --------------------------------------------------------------
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H;
+function resize(){ W = c.width = innerWidth; H = c.height = innerHeight;
+  ctx.fillStyle = '#0b0a0f'; ctx.fillRect(0, 0, W, H); }
+resize(); addEventListener('resize', resize);
+
+const N = 520, parts = [];
+for (let i = 0; i < N; i++)
+  parts.push({ x: Math.random() * W, y: Math.random() * H,
+               vx: 0, vy: 0, heat: Math.random() });
+
+// the warmth point: follows the pointer, or wanders on its own
+let warm = { x: W / 2, y: H / 2 };
+const target = { x: W / 2, y: H / 2 };
+let pointerUntil = 0;
+function onMove(e){
+  const t = (e.touches && e.touches[0]) || e;
+  target.x = t.clientX; target.y = t.clientY;
+  pointerUntil = performance.now() + 2200;
+}
+addEventListener('mousemove', onMove);
+addEventListener('touchmove', e => { onMove(e); e.preventDefault(); }, { passive: false });
+
+const scale = 0.0015;
+let t = 0;
+function frame(now){
+  t += 0.0008;
+  ctx.fillStyle = 'rgba(11,10,15,0.09)';   // trails
+  ctx.fillRect(0, 0, W, H);
+
+  // where the warmth wants to be
+  if (now < pointerUntil){ target.x = target.x; }   // pointer set it already
+  else {                                            // wander by noise
+    target.x = (0.5 + 0.42 * noise2(t * 6, 11.3)) * W;
+    target.y = (0.5 + 0.42 * noise2(19.7, t * 6)) * H;
+  }
+  warm.x += (target.x - warm.x) * 0.03;
+  warm.y += (target.y - warm.y) * 0.03;
+
+  for (const p of parts){
+    // slow ambient drift from the noise current
+    const a = noise2(p.x * scale, p.y * scale + t * 20) * Math.PI * 3;
+    p.vx += Math.cos(a) * 0.02;
+    p.vy += Math.sin(a) * 0.02;
+    // pull toward warmth, stronger up close (embers gather to heat)
+    const dx = warm.x - p.x, dy = warm.y - p.y;
+    const d2 = dx * dx + dy * dy, d = Math.sqrt(d2) + 0.001;
+    const pull = Math.min(0.5, 9000 / d2);
+    p.vx += (dx / d) * pull;
+    p.vy += (dy / d) * pull;
+    p.vx *= 0.94; p.vy *= 0.94;                       // damping
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0) p.x += W; if (p.x > W) p.x -= W;
+    if (p.y < 0) p.y += H; if (p.y > H) p.y -= H;
+
+    // heat rises near warmth, fades far away
+    const near = Math.max(0, 1 - d / 260);
+    p.heat += (near - p.heat) * 0.06;
+    const h = p.heat;
+    const r = (255 * (0.55 + 0.45 * h)) | 0;
+    const g = (120 + 110 * h) | 0;
+    const b = (70 + 40 * (1 - h)) | 0;
+    const alpha = 0.14 + 0.7 * h;
+    const size = 0.6 + 2.4 * h;
+    ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+    ctx.lineWidth = size;
+    ctx.beginPath();
+    ctx.moveTo(p.x - p.vx, p.y - p.vy);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

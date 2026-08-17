@@ -1,0 +1,113 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Something That Grows</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden}
+  canvas{display:block}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.42;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap">a rule, applied to itself, until it looks like it was alive</div>
+<script>
+// An L-system. One tiny rule, folded into itself five times, then walked
+// by a turtle that only knows "forward", "turn", "remember", "return".
+// No branch is drawn on purpose. The tree is the rule, made visible.
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H;
+function resize(){ W = c.width = innerWidth; H = c.height = innerHeight; }
+resize(); addEventListener('resize', () => { resize(); reset(true); });
+
+const AXIOM = 'X';
+const RULES = { X: 'F+[[X]-X]-F[-FX]+X', F: 'FF' };
+const DEPTH = 5;
+
+function expand(){
+  let s = AXIOM;
+  for (let i = 0; i < DEPTH; i++){
+    let o = '';
+    for (const ch of s) o += RULES[ch] || ch;
+    s = o;
+  }
+  return s;
+}
+const STRING = expand();
+
+// warm, dawn-lit gradient from trunk to tip
+const COLS = ['#a86b3c','#bd7844','#d0854f','#e0925c','#ec9f68',
+              '#f2b276','#f4c58a','#efcf9c'];
+
+// turtle-walk the string into positioned segments, tagged by branch depth
+function walk(angleDeg){
+  const seg = [];
+  const da = angleDeg * Math.PI / 180, step = 4;
+  let x = 0, y = 0, ang = -Math.PI / 2, depth = 0;
+  const stack = [];
+  let minx = 0, maxx = 0, miny = 0, maxy = 0;
+  for (const ch of STRING){
+    if (ch === 'F'){
+      const nx = x + Math.cos(ang) * step, ny = y + Math.sin(ang) * step;
+      seg.push([x, y, nx, ny, depth]);
+      x = nx; y = ny;
+      if (x < minx) minx = x; if (x > maxx) maxx = x;
+      if (y < miny) miny = y; if (y > maxy) maxy = y;
+    } else if (ch === '+') ang += da;
+    else if (ch === '-') ang -= da;
+    else if (ch === '[') { stack.push([x, y, ang, depth]); depth++; }
+    else if (ch === ']') { const p = stack.pop(); x = p[0]; y = p[1]; ang = p[2]; depth = p[3]; }
+  }
+  return { seg, minx, maxx, miny, maxy };
+}
+
+let segs, i, done, holdUntil, alpha;
+function reset(clear){
+  const angle = 22 + Math.random() * 6;      // a little variation each life
+  const g = walk(angle);
+  const margin = Math.min(W, H) * 0.08 + 20;
+  const spanX = g.maxx - g.minx, spanY = g.maxy - g.miny;
+  const scale = Math.min((W - 2 * margin) / spanX, (H - 2 * margin) / spanY);
+  const cx = W / 2 - ((g.minx + g.maxx) / 2) * scale;
+  const baseY = H - margin;
+  segs = g.seg.map(s => [
+    cx + s[0] * scale, baseY - (g.maxy - s[1]) * scale,
+    cx + s[2] * scale, baseY - (g.maxy - s[3]) * scale, s[4]
+  ]);
+  i = 0; done = false; holdUntil = 0; alpha = 1;
+  if (clear){ ctx.fillStyle = '#0b0a0f'; ctx.fillRect(0, 0, W, H); }
+}
+reset(true);
+
+const PER = Math.max(6, (segs.length / 360) | 0);
+function frame(now){
+  if (!done){
+    // fade the previous life away gently before the new one is grown in
+    if (alpha < 1){ ctx.fillStyle = 'rgba(11,10,15,0.04)'; ctx.fillRect(0, 0, W, H); }
+    const end = Math.min(i + PER, segs.length);
+    for (; i < end; i++){
+      const s = segs[i], d = s[4];
+      ctx.strokeStyle = COLS[Math.min(d, COLS.length - 1)];
+      ctx.lineWidth = Math.max(0.6, 3.2 - d * 0.5);
+      ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(s[2], s[3]); ctx.stroke();
+    }
+    if (i >= segs.length){ done = true; holdUntil = now + 3200; }
+  } else if (now > holdUntil){
+    // let it stand a while, then dissolve and grow another
+    ctx.fillStyle = 'rgba(11,10,15,0.05)'; ctx.fillRect(0, 0, W, H);
+    if (now > holdUntil + 1400){ reset(false); alpha = 0; }
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
