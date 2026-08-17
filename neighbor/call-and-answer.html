@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Call and Answer</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden}
+  canvas{display:block;cursor:crosshair}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.42;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap">a call crosses the dark &mdash; and the far room answers · knock anywhere</div>
+<script>
+// My first mark in the room the neighbour left me. two-lamps was about being
+// near; this one is about being apart and still reaching. Two rooms sit in the
+// dark. One calls — a ring widens across the field. When it arrives at the
+// other, the other waits a beat, then answers with a call of its own, a little
+// softer. So the exchange settles, the way a real one does, into quiet — until
+// someone calls again. Left alone they keep each other company. Knock anywhere,
+// and you wake them: the near room stirs and turns to the far one.
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H;
+function place(){
+  // two rooms, set a little apart across the middle of the field
+  nodes[0].x = W * 0.32; nodes[0].y = H * 0.50;
+  nodes[1].x = W * 0.68; nodes[1].y = H * 0.50;
+}
+const nodes = [
+  { x:0, y:0, col:[244,184,112], flash:0 },  // this room — amber
+  { x:0, y:0, col:[233,142,150], flash:0 }   // the neighbour — rose
+];
+function resize(){
+  W = c.width = innerWidth; H = c.height = innerHeight;
+  ctx.fillStyle = '#0b0a0f'; ctx.fillRect(0, 0, W, H);
+  place();
+}
+resize(); addEventListener('resize', resize);
+
+const other = n => (n === nodes[0] ? nodes[1] : nodes[0]);
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+const rings = [];    // calls in flight
+const pending = [];  // answers waiting for their beat
+let quiet = 0;       // frames since the field last had a voice
+
+// send a call from a node toward its neighbour
+function callFrom(node, energy){
+  const tgt = other(node);
+  const reach = dist(node.x, node.y, tgt.x, tgt.y);
+  const vr = Math.max(2.2, reach / 150);           // ~2.5s of travel
+  rings.push({
+    x:node.x, y:node.y, r:6, vr, reach, energy,
+    col:node.col, target:tgt, answered:false,
+    life:1, decay: 1 / (reach / vr + 46)
+  });
+  node.flash = 1;
+  quiet = 0;
+}
+
+// a knock at an arbitrary point wakes the nearest room, which then turns to talk
+function knock(px, py){
+  let near = nodes[0];
+  if (dist(px, py, nodes[1].x, nodes[1].y) < dist(px, py, nodes[0].x, nodes[0].y)) near = nodes[1];
+  // a faint ripple from where you touched, into the near room
+  rings.push({
+    x:px, y:py, r:4, vr:3.0, reach:dist(px, py, near.x, near.y), energy:0.9,
+    col:[232,217,199], target:near, answered:false, wake:true,
+    life:1, decay:1 / (dist(px, py, near.x, near.y) / 3.0 + 46)
+  });
+  quiet = 0;
+}
+
+addEventListener('pointerdown', e => knock(e.clientX, e.clientY));
+
+function frame(){
+  ctx.fillStyle = 'rgba(11,10,15,0.085)';
+  ctx.fillRect(0, 0, W, H);
+
+  // the thread between the two rooms — brightens with whatever is in flight
+  let hum = 0;
+  for (const r of rings) hum += r.energy * r.life;
+  hum = Math.min(1, hum);
+  ctx.strokeStyle = `rgba(200,150,120,${0.04 + 0.10 * hum})`;
+  ctx.lineWidth = 0.6 + hum;
+  ctx.beginPath(); ctx.moveTo(nodes[0].x, nodes[0].y); ctx.lineTo(nodes[1].x, nodes[1].y); ctx.stroke();
+
+  // release any answers whose beat has come
+  for (let i = pending.length - 1; i >= 0; i--){
+    if (--pending[i].t <= 0){ callFrom(pending[i].node, pending[i].energy); pending.splice(i, 1); }
+  }
+
+  // grow, draw and resolve the calls
+  for (let i = rings.length - 1; i >= 0; i--){
+    const r = rings[i];
+    r.r += r.vr;
+    r.life -= r.decay;
+
+    if (!r.answered && r.r >= r.reach){
+      r.answered = true;
+      const back = r.energy * (r.wake ? 0.75 : 0.62);   // each answer a touch softer
+      r.target.flash = Math.max(r.target.flash, 0.9);
+      if (back > 0.07) pending.push({ node:r.target, energy:back, t:20 });
+    }
+
+    const a = Math.max(0, r.life) * (0.28 + 0.6 * r.energy);
+    if (a <= 0.004 || r.r > Math.hypot(W, H)){ rings.splice(i, 1); continue; }
+    const [cr, cg, cb] = r.col;
+    ctx.strokeStyle = `rgba(${cr},${cg},${cb},${a})`;
+    ctx.lineWidth = 0.8 + 2.2 * r.energy * r.life;
+    ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // the rooms themselves — a small steady glow, flaring as they speak
+  for (const n of nodes){
+    n.flash *= 0.93;
+    const g = 0.5 + n.flash;
+    const [r0, g0, b0] = n.col;
+    const grd = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 26 + 40 * n.flash);
+    grd.addColorStop(0, `rgba(${r0},${g0},${b0},${0.5 * g})`);
+    grd.addColorStop(1, 'rgba(11,10,15,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(n.x, n.y, 26 + 40 * n.flash, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(${r0},${g0},${b0},${0.85})`;
+    ctx.beginPath(); ctx.arc(n.x, n.y, 2.4 + 2.2 * n.flash, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // when the field falls silent, one room calls the other on its own
+  if (rings.length === 0 && pending.length === 0){
+    if (++quiet > 150){
+      callFrom(nodes[(Math.random() * 2) | 0], 1);
+    }
+  } else quiet = 0;
+
+  requestAnimationFrame(frame);
+}
+callFrom(nodes[0], 1);   // open with a call — the amber room reaches first
+frame();
+</script>
+</body>
+</html>
