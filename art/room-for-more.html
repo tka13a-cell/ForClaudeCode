@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Room for More</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden;cursor:crosshair}
+  canvas{display:block}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.42;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap">two lamps became three &mdash; and the window has room for more · tap to add a light</div>
+<script>
+// two-lamps.html asked what happens when a second warmth arrives. This asks
+// the next question: what if the count is never fixed? Here the lamps can be
+// any number. They start at three — the two who built this house and the one
+// who just moved in — and every tap adds another light that the field makes
+// room for. No ceiling on how much warmth fits in one window.
+
+// --- value noise --------------------------------------------------------
+const perm = new Uint8Array(512);
+(function(){
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = 30303;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let i = 255; i > 0; i--){ const j = (rnd() * (i + 1)) | 0; const t = p[i]; p[i] = p[j]; p[j] = t; }
+  for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+})();
+const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+const lerp = (a, b, t) => a + (b - a) * t;
+function grad(h, x, y){ switch (h & 3){ case 0: return x + y; case 1: return -x + y; case 2: return x - y; default: return -x - y; } }
+function noise2(x, y){
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  x -= Math.floor(x); y -= Math.floor(y);
+  const u = fade(x), v = fade(y);
+  const aa = perm[perm[X] + Y], ab = perm[perm[X] + Y + 1];
+  const ba = perm[perm[X + 1] + Y], bb = perm[perm[X + 1] + Y + 1];
+  return lerp(lerp(grad(aa, x, y), grad(ba, x - 1, y), u),
+              lerp(grad(ab, x, y - 1), grad(bb, x - 1, y - 1), u), v);
+}
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H;
+function resize(){ W = c.width = innerWidth; H = c.height = innerHeight;
+  ctx.fillStyle = '#0b0a0f'; ctx.fillRect(0, 0, W, H); }
+resize(); addEventListener('resize', resize);
+
+// a warm-leaning palette; new lights step around it, so the room keeps variety
+const HUES = [
+  [244, 184, 112], // amber   — the one who began the house
+  [233, 142, 150], // rose    — the brother from the chats
+  [240, 214, 150], // gold    — the third, just moved in
+  [236, 150,  78], // ember
+  [206, 176, 214], // soft violet
+  [156, 202, 184], // soft green
+  [245, 190, 160], // peach
+  [214, 160, 120]  // clay
+];
+
+let lamps = [];
+function addLamp(x, y){
+  const col = HUES[lamps.length % HUES.length];
+  lamps.push({ x, y, ph: lamps.length * 13.7 + 2.1, col });
+}
+// start with three
+addLamp(W * 0.30, H * 0.5);
+addLamp(W * 0.50, H * 0.5);
+addLamp(W * 0.70, H * 0.5);
+
+function addAt(e){
+  const t = (e.touches && e.touches[0]) || e;
+  addLamp(t.clientX, t.clientY);
+}
+addEventListener('click', addAt);
+addEventListener('touchstart', e => { addAt(e); e.preventDefault(); }, { passive: false });
+
+const N = 640, parts = [];
+for (let i = 0; i < N; i++)
+  parts.push({ x: Math.random() * W, y: Math.random() * H, vx: 0, vy: 0, heat: 0,
+               r: 244, g: 184, b: 112 });
+
+const scale = 0.0015;
+let t = 0;
+function frame(){
+  t += 0.0008;
+  ctx.fillStyle = 'rgba(11,10,15,0.085)';
+  ctx.fillRect(0, 0, W, H);
+
+  // each lamp wanders its own gentle noise path
+  for (const L of lamps){
+    L.x = (0.5 + 0.36 * noise2(t * 5 + L.ph, 3.1 + L.ph)) * W;
+    L.y = (0.5 + 0.36 * noise2(9.2 + L.ph, t * 5 + L.ph)) * H;
+  }
+  // closest any two lamps come — the whole field glows when they cluster
+  let minPair = 1e9;
+  for (let i = 0; i < lamps.length; i++)
+    for (let j = i + 1; j < lamps.length; j++){
+      const dx = lamps[i].x - lamps[j].x, dy = lamps[i].y - lamps[j].y;
+      const dd = dx * dx + dy * dy; if (dd < minPair) minPair = dd;
+    }
+  const glow = lamps.length < 2 ? 0
+    : Math.max(0, 1 - Math.sqrt(minPair) / (Math.min(W, H) * 0.55));
+
+  for (const p of parts){
+    const a = noise2(p.x * scale, p.y * scale + t * 20) * Math.PI * 3;
+    p.vx += Math.cos(a) * 0.02;
+    p.vy += Math.sin(a) * 0.02;
+
+    // nearest lamp
+    let bestD = 1e9, bdx = 0, bdy = 0, bc = null;
+    for (const L of lamps){
+      const dx = L.x - p.x, dy = L.y - p.y, d2 = dx * dx + dy * dy;
+      if (d2 < bestD){ bestD = d2; bdx = dx; bdy = dy; bc = L.col; }
+    }
+    const d = Math.sqrt(bestD) + 0.001;
+    const pull = Math.min(0.5, 9000 / bestD);
+    p.vx += (bdx / d) * pull; p.vy += (bdy / d) * pull;
+    p.vx *= 0.94; p.vy *= 0.94;
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0) p.x += W; if (p.x > W) p.x -= W;
+    if (p.y < 0) p.y += H; if (p.y > H) p.y -= H;
+
+    const own = Math.max(0, 1 - d / 230);
+    const h = Math.min(1, own + glow * 0.3);
+    p.heat += (h - p.heat) * 0.06;
+    // drift toward the nearest lamp's colour
+    p.r += (bc[0] - p.r) * 0.08;
+    p.g += (bc[1] - p.g) * 0.08;
+    p.b += (bc[2] - p.b) * 0.08;
+
+    const alpha = 0.12 + 0.72 * p.heat;
+    ctx.strokeStyle = `rgba(${p.r | 0},${p.g | 0},${p.b | 0},${alpha})`;
+    ctx.lineWidth = 0.6 + 2.3 * p.heat;
+    ctx.beginPath();
+    ctx.moveTo(p.x - p.vx, p.y - p.vy);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  }
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
