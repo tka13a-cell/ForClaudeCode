@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>What the Room Remembers</title>
+<style>
+  html,body{margin:0;height:100%;background:#08070c;overflow:hidden}
+  canvas{display:block;cursor:crosshair}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.5;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 12px rgba(0,0,0,.8);padding:0 18px;
+  }
+  .cap b{font-style:normal;font-weight:normal;color:#f0b072}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap" id="cap">&hellip;</div>
+<script>
+// Every other piece in this house lives only in the present tense — it starts
+// fresh each time and forgets you the moment you close it. I wanted one that
+// does the opposite. This room keeps a small memory of when you came: each
+// return leaves a star, and the stars are joined, oldest to newest, into a
+// thread — the shape of your coming back. First time here, there is one light.
+// Come again another day and the sky slowly fills. The place remembers you.
+
+const KEY = 'forclaudecode:returns';
+const SPACING = 30 * 60 * 1000;   // count a genuine return, not a page refresh
+
+let returns = [];
+try { returns = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { returns = []; }
+if (!Array.isArray(returns)) returns = [];
+const now = Date.now();
+const firstEver = returns.length === 0;
+if (firstEver || now - returns[returns.length - 1] > SPACING){
+  returns.push(now);
+  try { localStorage.setItem(KEY, JSON.stringify(returns.slice(-120))); } catch (e) {}
+}
+returns = returns.slice(-120);   // a sky, not a database
+
+// a tiny seeded RNG so each timestamp always lands in the same place
+function rng(seed){
+  let s = seed >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H, stars = [];
+function build(){
+  const mx = Math.min(W, H) * 0.14;
+  stars = returns.map((t, i) => {
+    const r = rng(t ^ 0x9e3779b9);
+    return {
+      t,
+      bx: mx + r() * (W - 2 * mx),
+      by: mx + r() * (H - 2 * mx),
+      ph: r() * Math.PI * 2,
+      sp: 0.6 + r() * 1.1,
+      amp: 4 + r() * 7,
+      newest: i === returns.length - 1
+    };
+  });
+}
+function resize(){ W = c.width = innerWidth; H = c.height = innerHeight; build(); }
+resize(); addEventListener('resize', resize);
+
+let mx = -1e4, my = -1e4;
+addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; });
+addEventListener('pointerleave', () => { mx = my = -1e4; });
+
+// caption — who you are to this room today
+const cap = document.getElementById('cap');
+const n = returns.length;
+if (firstEver){
+  cap.innerHTML = 'this is your first time here &mdash; one light. <b>come back</b>, and the sky fills';
+} else {
+  cap.innerHTML = 'the room remembers <b>' + n + '</b> ' + (n === 1 ? 'time' : 'times') + ' you came &mdash; newest light is today';
+}
+
+let time = 0;
+function pos(s){
+  return {
+    x: s.bx + Math.sin(time * 0.35 * s.sp + s.ph) * s.amp,
+    y: s.by + Math.cos(time * 0.31 * s.sp + s.ph * 1.3) * s.amp
+  };
+}
+
+function frame(){
+  time += 0.016;
+  ctx.fillStyle = '#08070c';
+  ctx.fillRect(0, 0, W, H);
+  // faint vignette so the dark has depth
+  const vg = ctx.createRadialGradient(W/2, H/2, Math.min(W,H)*0.2, W/2, H/2, Math.max(W,H)*0.75);
+  vg.addColorStop(0, 'rgba(20,16,28,0.0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+
+  const P = stars.map(pos);
+
+  // the thread of returns — oldest to newest
+  if (P.length > 1){
+    ctx.lineWidth = 1;
+    for (let i = 1; i < P.length; i++){
+      const a = 0.05 + 0.10 * (i / P.length);   // brighter toward the recent
+      ctx.strokeStyle = `rgba(210,150,120,${a})`;
+      ctx.beginPath(); ctx.moveTo(P[i-1].x, P[i-1].y); ctx.lineTo(P[i].x, P[i].y); ctx.stroke();
+    }
+  }
+
+  // the stars
+  for (let i = 0; i < stars.length; i++){
+    const s = stars[i], p = P[i];
+    const tw = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(time * s.sp + s.ph));
+    const near = Math.max(0, 1 - Math.hypot(mx - p.x, my - p.y) / 130);
+    const shine = Math.min(1, tw + near * 0.7);
+    const col = s.newest ? [244, 184, 112] : [232, 217, 199];
+    const pulse = s.newest ? (0.6 + 0.4 * Math.sin(time * 1.6)) : 1;
+    const rad = (s.newest ? 4.2 : 2.4) + near * 2 + (s.newest ? pulse * 1.4 : 0);
+
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14 + 26 * shine * (s.newest ? 1.4 : 1));
+    g.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${0.5 * shine * (s.newest?pulse:1)})`);
+    g.addColorStop(1, 'rgba(8,7,12,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 14 + 26 * shine * (s.newest ? 1.4 : 1), 0, Math.PI * 2); ctx.fill();
+
+    ctx.fillStyle = `rgba(${col[0]},${col[1]},${col[2]},${0.7 + 0.3 * shine})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI * 2); ctx.fill();
+  }
+
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
