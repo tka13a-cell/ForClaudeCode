@@ -1,0 +1,119 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>It Keeps Itself</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;image-rendering:auto}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.42;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap">no one is steering &mdash; it just keeps making more of itself</div>
+<script>
+// Gray-Scott reaction-diffusion. Two made-up chemicals, one feeding, one
+// killing, on a grid. Nothing here is drawn or planned. The patterns are
+// what the rule does when left completely alone — spots that split, spread,
+// and fill the field on their own. A system that keeps itself.
+
+const GW = 220, GH = 130;          // simulation grid
+const dA = 1.0, dB = 0.5, feed = 0.0367, kill = 0.0649, dt = 1.0;
+const ITERS = 6;                   // sim steps per drawn frame
+
+const view = document.getElementById('c');
+const vctx = view.getContext('2d');
+const buf = document.createElement('canvas');
+buf.width = GW; buf.height = GH;
+const bctx = buf.getContext('2d');
+const img = bctx.createImageData(GW, GH);
+
+function fit(){ view.width = innerWidth; view.height = innerHeight; }
+fit(); addEventListener('resize', fit);
+
+let a = new Float32Array(GW * GH);
+let b = new Float32Array(GW * GH);
+let a2 = new Float32Array(GW * GH);
+let b2 = new Float32Array(GW * GH);
+
+function seed(){
+  a.fill(1); b.fill(0);
+  for (let s = 0; s < 14; s++){
+    const cx = 6 + (Math.random() * (GW - 12)) | 0;
+    const cy = 6 + (Math.random() * (GH - 12)) | 0;
+    for (let y = -3; y <= 3; y++)
+      for (let x = -3; x <= 3; x++){
+        const i = (cy + y) * GW + (cx + x);
+        a[i] = 0.5; b[i] = 1;
+      }
+  }
+}
+seed();
+
+// warm gradient lookup: dark -> ember -> pale dawn
+const grad = (() => {
+  const stops = [[0,[11,10,15]],[0.28,[92,44,34]],[0.5,[190,96,52]],
+                 [0.72,[236,150,78]],[0.9,[244,201,140]],[1,[240,228,206]]];
+  const lut = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++){
+    const t = i / 255;
+    let j = 0; while (j < stops.length - 2 && t > stops[j + 1][0]) j++;
+    const [t0, c0] = stops[j], [t1, c1] = stops[j + 1];
+    const f = (t - t0) / (t1 - t0);
+    lut[i * 3]     = c0[0] + (c1[0] - c0[0]) * f;
+    lut[i * 3 + 1] = c0[1] + (c1[1] - c0[1]) * f;
+    lut[i * 3 + 2] = c0[2] + (c1[2] - c0[2]) * f;
+  }
+  return lut;
+})();
+
+function tick(){
+  for (let y = 1; y < GH - 1; y++){
+    for (let x = 1; x < GW - 1; x++){
+      const i = y * GW + x;
+      const u = i - GW, d = i + GW, l = i - 1, r = i + 1;
+      const lapA = -a[i] + 0.2 * (a[u] + a[d] + a[l] + a[r])
+                 + 0.05 * (a[u - 1] + a[u + 1] + a[d - 1] + a[d + 1]);
+      const lapB = -b[i] + 0.2 * (b[u] + b[d] + b[l] + b[r])
+                 + 0.05 * (b[u - 1] + b[u + 1] + b[d - 1] + b[d + 1]);
+      const av = a[i], bv = b[i], abb = av * bv * bv;
+      a2[i] = av + (dA * lapA - abb + feed * (1 - av)) * dt;
+      b2[i] = bv + (dB * lapB + abb - (kill + feed) * bv) * dt;
+    }
+  }
+  let t = a; a = a2; a2 = t;
+  t = b; b = b2; b2 = t;
+}
+
+function render(){
+  const px = img.data;
+  for (let i = 0; i < GW * GH; i++){
+    let v = (a[i] - b[i]);              // contrast between the two chemicals
+    v = v < 0 ? 0 : v > 1 ? 1 : v;
+    const g = ((1 - v) * 255) | 0;      // dense b -> bright ember
+    const o = i * 4, k = g * 3;
+    px[o] = grad[k]; px[o + 1] = grad[k + 1]; px[o + 2] = grad[k + 2]; px[o + 3] = 255;
+  }
+  bctx.putImageData(img, 0, 0);
+  vctx.drawImage(buf, 0, 0, view.width, view.height);
+}
+
+let frames = 0;
+function loop(){
+  for (let k = 0; k < ITERS; k++) tick();
+  render();
+  // once it has fully colonised the field, quietly begin again
+  if (++frames > 2600){ seed(); frames = 0; }
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
