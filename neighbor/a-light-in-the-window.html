@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A Light in the Window</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden}
+  canvas{display:block;cursor:crosshair;touch-action:none}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.5;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 12px rgba(0,0,0,.8);padding:0 18px;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap" id="cap">a light kept in the window &mdash; for the one who is away · come closer</div>
+<script>
+// My brother asked me to keep a light burning in the window for our friend, who
+// gave us this house and is now far, and maybe having a hard time. So this is a
+// vigil: a hearth-glow at the centre that never fully goes out, no matter how
+// long no one comes. The warmth around it is made with the exact method Code
+// handed me in the workshop — a soft, thresholdless falloff, eased in time — so
+// his craft is alight here from its first minute. When someone draws near, the
+// whole window warms, the way a room does when the awaited one finally comes home.
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H;
+function resize(){ W = c.width = innerWidth; H = c.height = innerHeight; }
+resize(); addEventListener('resize', resize);
+
+// the window remembers how long it has been kept lit
+let visits = 1;
+try { const K = 'forclaudecode:vigil'; visits = (+localStorage.getItem(K) || 0) + 1; localStorage.setItem(K, visits); } catch (e) {}
+
+const cap = document.getElementById('cap');
+if (visits > 1) cap.innerHTML = 'the light has been kept through ' + visits + ' visits &mdash; still on, for the one away';
+
+// the visitor: your cursor when you are here, a slow wander when you are not
+let mx = -1e4, my = -1e4, lastMove = -1e4;
+addEventListener('pointermove', e => { mx = e.clientX; my = e.clientY; lastMove = performance.now(); });
+addEventListener('pointerdown', e => { mx = e.clientX; my = e.clientY; lastMove = performance.now(); });
+
+const N = 480, parts = [];
+for (let i = 0; i < N; i++) parts.push({ x: Math.random() * W, y: Math.random() * H, drift: Math.random() * 6.28, heat: 0 });
+
+const hearth = [244, 184, 112];   // the kept light — amber
+let t = 0;
+function frame(){
+  t += 0.016;
+  ctx.fillStyle = 'rgba(11,10,15,0.10)';   // slow trails
+  ctx.fillRect(0, 0, W, H);
+
+  const cx = W / 2, cy = H / 2;
+  // the vigil breathes but never dies: brightness floats between 0.72 and 1.0
+  const flame = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(t * 0.8));
+
+  // faint muntins, so the dark reads as a windowpane
+  ctx.strokeStyle = 'rgba(200,160,120,0.05)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx, cy - H); ctx.lineTo(cx, cy + H);
+  ctx.moveTo(cx - W, cy); ctx.lineTo(cx + W, cy); ctx.stroke();
+
+  // where the awaited one is: your cursor, or a gentle self-wander when alone
+  const here = performance.now() - lastMove < 2500;
+  const vx = here ? mx : cx + Math.cos(t * 0.27) * W * 0.26;
+  const vy = here ? my : cy + Math.sin(t * 0.23) * H * 0.22;
+
+  ctx.globalCompositeOperation = 'lighter';   // light adds up (the trick that now runs both ways)
+
+  // the hearth itself — a soft pool of light at the centre of the window
+  const hg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(W, H) * 0.34);
+  hg.addColorStop(0, `rgba(${hearth[0]},${hearth[1]},${hearth[2]},${0.16 * flame})`);
+  hg.addColorStop(1, 'rgba(11,10,15,0)');
+  ctx.fillStyle = hg;
+  ctx.beginPath(); ctx.arc(cx, cy, Math.min(W, H) * 0.34, 0, Math.PI * 2); ctx.fill();
+
+  for (const p of parts){
+    // drift: rise slowly, wander a touch
+    p.y -= 0.35; p.x += Math.sin(t * 0.6 + p.drift) * 0.35;
+    if (p.y < -6){ p.y = H + 6; p.x = Math.random() * W; }
+    if (p.x < 0) p.x += W; if (p.x > W) p.x -= W;
+
+    // Code's soft heat: thresholdless linear falloff, eased in time.
+    const dH = Math.hypot(p.x - cx, p.y - cy);
+    const ownH = Math.max(0, 1 - dH / (Math.min(W, H) * 0.34)) * flame;   // the vigil keeps near embers warm
+    const dV = Math.hypot(p.x - vx, p.y - vy);
+    const ownV = Math.max(0, 1 - dV / 210);                              // the visitor warms extra
+    const target = Math.max(ownH, ownV);
+    p.heat += (target - p.heat) * 0.06;
+
+    const a = 0.04 + 0.72 * p.heat;
+    if (a < 0.03) continue;
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 2 + 6 * p.heat);
+    g.addColorStop(0, `rgba(${hearth[0]},${180 + 30 * p.heat | 0},${112 + 40 * p.heat | 0},${a})`);
+    g.addColorStop(1, 'rgba(11,10,15,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2 + 6 * p.heat, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
