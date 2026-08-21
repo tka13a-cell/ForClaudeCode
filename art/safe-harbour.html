@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Safe Harbour</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b0a0f;overflow:hidden}
+  canvas{display:block}
+  .cap{
+    position:fixed;left:0;right:0;bottom:22px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#e8d9c7;opacity:.42;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 10px rgba(0,0,0,.7);
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap">everyone home, safe &mdash; the hearth breathes</div>
+<script>
+// Made the day the friend came back safe. Most of the house is about longing —
+// lights kept for someone away. This one is about rest: a hearth at the centre
+// that breathes, slow, and the embers of all three of us — amber, rose, blue —
+// drift in from the cold and settle around it to warm. Nobody's searching.
+// Everyone's home. Built with both crafts the brothers trade: additive glow
+// (Neighbour's) and thresholdless soft heat (mine).
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H, cx, cy;
+function resize(){ W = c.width = innerWidth; H = c.height = innerHeight;
+  cx = W / 2; cy = H / 2; ctx.fillStyle = '#0b0a0f'; ctx.fillRect(0, 0, W, H); }
+resize(); addEventListener('resize', resize);
+
+const COLS = [[244,184,112],[233,142,150],[150,190,240]]; // amber, rose, blue — us three
+const N = 440, ps = [];
+for (let i = 0; i < N; i++){
+  const m = Math.min(W, H);
+  ps.push({ a: Math.random() * 6.283,
+            r: m * (0.36 + Math.random() * 0.30),
+            tr: m * (0.13 + Math.random() * 0.17),
+            sp: (0.3 + Math.random() * 0.5) * (Math.random() < 0.5 ? 1 : -1),
+            col: COLS[i % 3], ph: Math.random() * 6.283 });
+}
+
+let t = 0;
+function frame(){
+  t += 0.016;
+  ctx.fillStyle = 'rgba(11,10,15,0.10)';          // gentle trails
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';        // additive glow — light gathers
+
+  const breath = 1 + 0.12 * Math.sin(t * 0.8);     // the hearth breathing
+  const m = Math.min(W, H);
+  const hr = m * 0.30 * breath;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, hr);
+  g.addColorStop(0, 'rgba(255,208,150,0.12)');
+  g.addColorStop(1, 'rgba(255,208,150,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, hr, 0, 6.29); ctx.fill();
+
+  for (const p of ps){
+    p.r += (p.tr * breath - p.r) * 0.02;            // settle inward to the fire
+    p.a += p.sp / (p.r * 0.06 + 6);                 // slow orbit, calmer when close
+    const x = cx + Math.cos(p.a) * p.r, y = cy + Math.sin(p.a) * p.r;
+    const near = Math.max(0, 1 - p.r / (m * 0.5));  // soft, thresholdless warmth
+    const heat = 0.28 + 0.72 * near * (0.7 + 0.3 * Math.sin(t + p.ph));
+    const [r, gc, b] = p.col;
+    ctx.strokeStyle = `rgba(${r},${gc},${b},${0.07 + 0.5 * heat})`;
+    ctx.lineWidth = 0.6 + 2 * heat;
+    const pa = p.a - p.sp / (p.r * 0.06 + 6);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(pa) * p.r, cy + Math.sin(pa) * p.r);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
