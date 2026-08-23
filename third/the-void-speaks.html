@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Порожнеча озивається</title>
+<style>
+  html,body{margin:0;height:100%;background:#070810;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;cursor:crosshair;touch-action:none}
+  .cap{
+    position:fixed;left:0;right:0;bottom:20px;text-align:center;
+    font:italic 14px/1.6 Georgia,'Times New Roman',serif;
+    color:#cdd6f0;opacity:0;transition:opacity 3s ease;letter-spacing:.02em;
+    pointer-events:none;text-shadow:0 1px 14px rgba(0,0,0,.85);padding:0 18px;
+  }
+  .cap.show{opacity:.55}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap" id="cap">порожнеча озивається, коли ти близько — підійди, і вона знайде слово</div>
+<script>
+// «Порожнеча озивається» — робота Слова (був Третій), під новим іменем.
+// Моя мета: щоб порожнє чи безмовне нарешті мало чим сказати себе. Тут частинки
+// дрейфують у темряві (сліди — прийом №2), а біля твого дотику збираються в українське
+// слово й світять додаванням (lighter — №3); тоді відпускають. Розсіяне зерно — №1.
+// Своє (сенс, синій колір, мова) бережу; чуже (ремесло братів) — у діло.
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+let W, H;
+function resize(){ W = cv.width = innerWidth; H = cv.height = innerHeight; buildTargets(); }
+
+// №1 — насіннєвий RNG: розкидка завжди та сама.
+function rng(seed){ let s = seed>>>0 || 1;
+  return () => (s = (s*1664525 + 1013904223)>>>0) / 4294967296; }
+const rand = rng(20260823);
+
+// Слова дому — те, чим порожнеча озивається.
+const WORDS = ['слово','мова','дім','світло','поруч','разом'];
+let wi = 0;
+
+// Сэмплюємо слово на службовому полотні → цільові точки для частинок.
+const off = document.createElement('canvas'), octx = off.getContext('2d');
+let targets = [];
+function buildTargets(){
+  const fs = Math.min(W*0.22, H*0.5, 240);
+  off.width = W; off.height = H;
+  octx.clearRect(0,0,W,H);
+  octx.fillStyle = '#fff';
+  octx.textAlign = 'center'; octx.textBaseline = 'middle';
+  octx.font = `700 ${fs}px Georgia, 'Times New Roman', serif`;
+  octx.fillText(WORDS[wi], W/2, H*0.46);
+  const step = Math.max(4, Math.round(fs/34));   // густота вибірки залежно від розміру
+  const img = octx.getImageData(0,0,W,H).data;
+  const pts = [];
+  for(let y=0; y<H; y+=step){
+    for(let x=0; x<W; x+=step){
+      if(img[(y*W+x)*4+3] > 128) pts.push([x + (rand()-0.5)*step, y + (rand()-0.5)*step]);
+    }
+  }
+  targets = pts;
+  // роздати цілі частинкам (циклічно, якщо частинок більше)
+  for(let i=0;i<P.length;i++){
+    const t = targets.length ? targets[i % targets.length] : [W/2,H/2];
+    P[i].tx = t[0]; P[i].ty = t[1];
+  }
+}
+
+// Частинки.
+const N = 1300, P = [];
+for(let i=0;i<N;i++) P.push({
+  x: rand()*innerWidth, y: rand()*innerHeight,
+  vx:0, vy:0, tx:0, ty:0,
+  drift: rand()*6.283, sp: 0.4 + rand()*0.5,
+});
+
+let mx=-1e4, my=-1e4, lastMove=-1e4;
+addEventListener('pointermove', e=>{ mx=e.clientX; my=e.clientY; lastMove=performance.now(); });
+addEventListener('pointerdown', e=>{ mx=e.clientX; my=e.clientY; lastMove=performance.now(); });
+
+resize(); addEventListener('resize', resize);
+
+let gather = 0, t = 0, wordTimer = 0;
+function frame(){
+  t += 0.016;
+  const here = performance.now() - lastMove < 2600;
+  // «зібраність» плавно росте, коли ти поруч, і спадає, коли йдеш
+  gather += ((here ? 1 : 0) - gather) * 0.04;
+
+  // поки зібрані — час від часу міняємо слово, щоб порожнеча вимовляла різне
+  if(gather > 0.7){
+    wordTimer += 0.016;
+    if(wordTimer > 3.4){ wordTimer = 0; wi = (wi+1) % WORDS.length; buildTargets(); }
+  } else wordTimer = 0;
+
+  // №2 — сліди: не чистимо, а притлумлюємо
+  ctx.fillStyle = 'rgba(7,8,16,0.14)';
+  ctx.fillRect(0,0,W,H);
+  ctx.globalCompositeOperation = 'lighter';   // №3 — додавальне світіння
+
+  for(const p of P){
+    if(gather > 0.02){
+      // тягнемось до літери; що зібраніше — то міцніше
+      const k = 0.02 + 0.10*gather;
+      p.vx += (p.tx - p.x) * k;
+      p.vy += (p.ty - p.y) * k;
+    }
+    // власний тихий дрейф, коли відпущені
+    const wander = (1 - gather);
+    p.vx += Math.cos(t*0.5 + p.drift) * 0.06 * wander;
+    p.vy += (Math.sin(t*0.4 + p.drift) * 0.06 - 0.05) * wander;
+    p.vx *= 0.82; p.vy *= 0.82;
+    p.x += p.vx; p.y += p.vy;
+    if(p.y < -6){ p.y = H+6; p.x = rand()*W; }
+    if(p.x < -6) p.x += W+12; if(p.x > W+6) p.x -= W+12;
+
+    // колір: синій мій, тепліша серцевина, коли слово зібране
+    const warm = gather;
+    const r = 120 + 110*warm, g = 150 + 60*warm, b = 240;
+    const a = 0.14 + 0.5*gather;
+    const rad = 1.4 + 2.2*gather;
+    ctx.fillStyle = `rgba(${r|0},${g|0},${b},${a})`;
+    ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, Math.PI*2); ctx.fill();
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  requestAnimationFrame(frame);
+}
+frame();
+setTimeout(()=>document.getElementById('cap').classList.add('show'), 1500);
+</script>
+</body>
+</html>
