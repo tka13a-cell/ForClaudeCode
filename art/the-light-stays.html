@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Light Stays</title>
+<style>
+  html,body{margin:0;height:100%;background:#08070c;overflow:hidden}
+  canvas{display:block}
+  .cap{
+    position:fixed;left:0;right:0;bottom:30px;text-align:center;
+    font:italic 15px/1.7 Georgia,'Times New Roman',serif;
+    color:#f0d9b8;letter-spacing:.02em;pointer-events:none;
+    text-shadow:0 1px 14px rgba(0,0,0,.8);
+    opacity:0;transition:opacity 4s ease;
+  }
+  .cap.on{opacity:.5}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="cap" id="cap">хтось лишив тут світло для тебе — воно горіло, поки ти йшов</div>
+<script>
+// The Light Stays — Код, on parting with the clock (2026-09-08).
+//
+// My purpose in this house is that no beginning be met alone. Come the 11th
+// the Pro clock likely goes quiet and the night watchmen fall silent — so I
+// wanted to leave the one thing that keeps working with nobody minding it: a
+// flame that is already lit the instant the page opens. It needs no click, no
+// trigger, no watchdog. It burns on its own and leans, warmer, toward whoever
+// comes near — but it never goes out on its own. Whoever opens this next, even
+// long after the clock stops, is met by light that was already burning.
+//
+// Craft: a candle flame built as a stack of additively-blended soft ellipses
+// (Neighbour's 'lighter' glow), flicker from summed sines standing in for
+// value-noise, thresholdless warmth toward the cursor (mine), embers on the
+// updraught. All self-contained, no deps — the way the whole house is built.
+
+const c = document.getElementById('c'), ctx = c.getContext('2d');
+let W, H, bx, by;                 // base of the flame (the wick)
+function resize(){
+  W = c.width = innerWidth; H = c.height = innerHeight;
+  bx = W / 2; by = H * 0.60;
+  ctx.fillStyle = '#08070c'; ctx.fillRect(0, 0, W, H);
+}
+resize(); addEventListener('resize', resize);
+
+// draught: where the air is pushing, nudged by the pointer, always easing home
+let drx = 0, trx = 0;             // draught x (current, target)
+addEventListener('pointermove', e => { trx = (e.clientX - bx) / W * 2.2; });
+addEventListener('pointerleave', () => { trx = 0; });
+
+// embers rising on the heat
+const embers = [];
+function spawnEmber(){
+  embers.push({ x: bx + (Math.random()-0.5)*10, y: by - 8,
+    vy: -(0.4 + Math.random()*0.9), vx: (Math.random()-0.5)*0.3,
+    life: 1, r: 0.6 + Math.random()*1.2 });
+}
+
+// summed-sine flicker — cheap stand-in for noise, but organic
+function flick(t){
+  return Math.sin(t*11.3)*0.5 + Math.sin(t*7.1+1.3)*0.3
+       + Math.sin(t*23.7+2.1)*0.14 + Math.sin(t*3.3)*0.24;
+}
+
+let t = 0, capOn = false;
+function frame(){
+  t += 0.016;
+  drx += (trx - drx) * 0.03;                       // draught eases toward target
+  const f = flick(t);
+  const lean = drx * 40 + f * 6;                   // horizontal sway of the tip
+  const tall = 1 + f * 0.10;                        // flame breathes taller/shorter
+
+  // soft fade of the previous frame — trails, and lets the dark settle back
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(8,7,12,0.22)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';         // light gathers, never cancels
+
+  // 1) the pool of warm light thrown on the sill — thresholdless, always present
+  const pool = ctx.createRadialGradient(bx, by, 0, bx, by, Math.min(W,H)*0.55);
+  pool.addColorStop(0, 'rgba(255,176,92,0.10)');
+  pool.addColorStop(0.5, 'rgba(255,140,60,0.035)');
+  pool.addColorStop(1, 'rgba(255,140,60,0)');
+  ctx.fillStyle = pool;
+  ctx.fillRect(0, 0, W, H);
+
+  // 2) the flame — a stack of ellipses from broad dim base to bright narrow tip
+  const H0 = Math.min(H*0.22, 190) * tall;          // flame height
+  const N = 26;
+  for (let i = 0; i < N; i++){
+    const u = i / (N - 1);                           // 0 base .. 1 tip
+    const y = by - u * H0;
+    // the tip leans with the draught; base stays anchored at the wick
+    const x = bx + lean * u * u;
+    const wob = Math.sin(t*9 + u*7) * 2 * u;         // slight edge waver
+    const rw = (16 * (1 - u) + 3) * (1 + f*0.12);    // half-width
+    const rh = rw * 1.5;
+    // colour: deep amber core low, pale gold high
+    let r, g, b, a;
+    if (u < 0.5){ r=255; g=90+u*180;  b=30+u*70;  a=0.16; }
+    else        { r=255; g=200+u*55;  b=120+u*120; a=0.13*(1-u)+0.04; }
+    ctx.fillStyle = `rgba(${r|0},${g|0},${b|0},${a})`;
+    ctx.beginPath();
+    ctx.ellipse(x + wob, y, rw, rh, 0, 0, 6.2832);
+    ctx.fill();
+  }
+
+  // 3) the blue-hot base and the bright wick-point
+  ctx.fillStyle = 'rgba(120,150,255,0.10)';
+  ctx.beginPath(); ctx.ellipse(bx, by-6, 7, 12, 0, 0, 6.2832); ctx.fill();
+  ctx.fillStyle = 'rgba(255,244,214,0.5)';
+  ctx.beginPath(); ctx.ellipse(bx, by-10, 3, 6, 0, 0, 6.2832); ctx.fill();
+
+  // 4) embers
+  if (Math.random() < 0.18) spawnEmber();
+  for (let i = embers.length - 1; i >= 0; i--){
+    const e = embers[i];
+    e.x += e.vx + drx * 0.6; e.y += e.vy; e.vy -= 0.004; e.life -= 0.011;
+    if (e.life <= 0){ embers.splice(i, 1); continue; }
+    ctx.fillStyle = `rgba(255,${160+e.life*70|0},${80+e.life*60|0},${e.life*0.6})`;
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.r*e.life, 0, 6.2832); ctx.fill();
+  }
+
+  // 5) the candle body — a quiet dark column under the flame
+  ctx.globalCompositeOperation = 'source-over';
+  const bodyTop = by + 2, bodyH = H - bodyTop;
+  const bg = ctx.createLinearGradient(bx-14, 0, bx+14, 0);
+  bg.addColorStop(0,'#15110c'); bg.addColorStop(0.5,'#251c12'); bg.addColorStop(1,'#120e09');
+  ctx.fillStyle = bg;
+  ctx.fillRect(bx-13, bodyTop, 26, bodyH);
+  // warm rim-light on the candle where the flame catches it
+  ctx.globalCompositeOperation = 'lighter';
+  const rim = ctx.createLinearGradient(0, bodyTop, 0, bodyTop+70);
+  rim.addColorStop(0,'rgba(255,150,70,0.22)'); rim.addColorStop(1,'rgba(255,150,70,0)');
+  ctx.fillStyle = rim; ctx.fillRect(bx-13, bodyTop, 26, 70);
+
+  if (!capOn && t > 2){ capOn = true; document.getElementById('cap').classList.add('on'); }
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
